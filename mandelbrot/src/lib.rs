@@ -42,6 +42,7 @@ pub fn generate_mandelbrot_set(
     y_max: f64,
     max_iter: usize,
 ) -> Vec<u8> {
+    println!("--------------------------call!!!!!");
     // measure_elapsed_time!("gererate:wasm\telapsed:", {
     logic::generate_mandelbrot_set(canvas_w, canvas_h, x_min, x_max, y_min, y_max, max_iter)
     // })
