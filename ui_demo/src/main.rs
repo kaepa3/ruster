@@ -2,15 +2,54 @@ use iced::{
     button, executor, Align, Application, Button, Column, Command, Element, Font,
     HorizontalAlignment, Length, Row, Settings, Subscription, Text,
 };
+use iced_futures::{self, futures};
+use std::time::{Duration, Instant};
+
+const FPS: u64 = 30;
+const MILLISEC: u64 = 1000;
+const MINUTE: u64 = 60;
+const HOUR: u64 = 60 * MINUTE;
+
 const FONT: Font = Font::External {
     name: "PixelMplus12-Reqular",
     bytes: include_bytes!("../rsc/PixelMplus12-Regular.ttf"),
 };
+pub struct Timer {
+    duration: Duration,
+}
+impl Timer {
+    fn new(duration: Duration) -> Timer {
+        Timer { duration: duration }
+    }
+}
+
+impl<H, E> iced_native::subscription::Recipe<H, E> for Timer
+where
+    H: std::hash::Hasher,
+{
+    type Output = Instant;
+
+    fn hash(&self, state: &mut H) {
+        use ::std::hash::Hash;
+        std::any::TypeId::of::<Self>().hash(state);
+    }
+    fn stream(
+        self: Box<Self>,
+        _input: futures::stream::BoxStream<'static, E>,
+    ) -> futures::stream::BoxStream<'static, Self::Output> {
+        use futures::stream::StreamExt;
+        async_std::stream::interval(self.duration)
+            .map(|_| Instant::now())
+            .boxed()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Start,
     Stop,
     Reset,
+    Update,
 }
 pub enum TickState {
     Stopped,
@@ -18,18 +57,22 @@ pub enum TickState {
 }
 
 struct Gui {
+    last_update: Instant,
+    total_duration: Duration,
     tick_state: TickState,
     start_stop_button_state: button::State,
     reset_button_state: button::State,
 }
 
 impl Application for Gui {
-    type Executor = executor::Null;
+    type Executor = executor::Default;
     type Message = Message;
     type Flags = ();
     fn new(_flags: ()) -> (Gui, Command<Self::Message>) {
         (
             Gui {
+                last_update: Instant::now(),
+                total_duration: Duration::default(),
                 tick_state: TickState::Stopped,
                 start_stop_button_state: button::State::new(),
                 reset_button_state: button::State::new(),
@@ -37,23 +80,48 @@ impl Application for Gui {
             Command::none(),
         )
     }
+    fn subscription(&self) -> Subscription<Message> {
+        let timer = Timer::new(Duration::from_millis(MILLISEC / FPS));
+        iced::Subscription::from_recipe(timer).map(|_| Message::Update)
+    }
+
     fn title(&self) -> String {
         String::from("DEMO")
     }
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-        match message{
-            Message::Start =>{
-                self.tick_state = TickState::Ticking; 
+        match message {
+            Message::Start => {
+                self.tick_state = TickState::Ticking;
+                self.last_update = Instant::now();
             }
-            Message::Stop =>{
+            Message::Stop => {
                 self.tick_state = TickState::Stopped;
+                self.last_update += Instant::now() - self.last_update;
             }
-            Message::Reset =>{}
+            Message::Reset => {
+                self.last_update = Instant::now();
+                self.total_duration = Duration::default();
+            }
+            Message::Update => match self.tick_state {
+                TickState::Ticking => {
+                    let now_update = Instant::now();
+                    self.total_duration += now_update - self.last_update;
+                    self.last_update = now_update;
+                }
+                _ => {}
+            },
         }
         Command::none()
     }
     fn view(&mut self) -> Element<Self::Message> {
-        let duration_text = "00:00:00:00";
+        let seconds = self.total_duration.as_secs();
+        let duration_text = format!(
+            "{:0>2}:{:0>2}:{:0>2}:{:0>2}",
+            seconds / HOUR,
+            (seconds % HOUR) / MINUTE,
+            seconds % MINUTE,
+            self.total_duration.subsec_millis() / 10
+        );
 
         let start_stop_text = match self.tick_state {
             TickState::Stopped => Text::new("Start")
